@@ -1,7 +1,7 @@
 export const meta = {
   name: 'entwicklungsrunde',
   description: 'Entwicklungsrunde mit der simulierten Welt von MSY Studio: 100 zufaellig gezogene Figuren, Stimmung aller, Wortmeldungen der Redenden, Diskussion, Bericht mit Gewichtung nach Herkunft der Meinung',
-  whenToUse: 'Vor jeder Entscheidung, was oder wie gebaut wird, wenn Menschen es erleben. args: {welt, thema, frage, produkt, material, materialText, seed, anzahl, maxRedner, groesse, ausgabe, projektablage, startbefehl}',
+  whenToUse: 'Vor jeder Entscheidung, was oder wie gebaut wird, wenn Menschen es erleben. args: {welt, thema, frage, produkt, material, materialText, seed, anzahl, maxRedner, groesse, ausgabe, projektablage, startbefehl, sparModell, sparEffort}',
   phases: [
     { title: 'Stimmung', detail: 'alle Gezogenen: Interesse, erster Gedanke, reden oder schweigen' },
     { title: 'Wortmeldungen', detail: 'wer redet, sagt ausfuehrlich seine Meinung' },
@@ -15,7 +15,13 @@ export const meta = {
 // Pflicht: welt (Ordner mit figuren-01.json usw.), thema, frage, ausgabe (Ordner fuer diesen Lauf).
 // Wahlweise: seed (Zahl, wiederholbare Ziehung; sonst aus thema und frage), anzahl (Standard 100), maxRedner (25), groesse (Zahl der Figuren, 1000),
 //   projektablage (zweiter Ordner, z. B. im eigenen privaten Projekt, in den der Bericht zusaetzlich geschrieben wird),
-//   startbefehl (Vorsatz fuer Rechenlaeufe der Agenten, z. B. ein Starter mit niedriger Prioritaet).
+//   startbefehl (Vorsatz fuer Rechenlaeufe der Agenten, z. B. ein Starter mit niedriger Prioritaet),
+//   sparModell (z. B. 'haiku': Modell NUR fuer die Stimmung aller Gezogenen, Standard 'sonnet'; spart Tokens),
+//   sparEffort (z. B. 'low': Denkaufwand NUR fuer die Stimmung, Standard 'medium').
+//   Wortmeldungen (sonnet, medium), Diskussion und Bericht (Modell der Sitzung) bleiben davon unberuehrt.
+// Redner: Wollen mehr Figuren reden als maxRedner, reden zuerst einige Kritiker (Interesse bis 3), dann die mit dem hoechsten Interesse.
+//   Bei Gleichstand entscheidet eine aus dem Startwert gemischte Reihenfolge, nicht die Kennung (die Kennungen sind nach Laendern
+//   vergeben). Gleicher Startwert und gleiche Stimmung ergeben dieselben Redner.
 // Figuren: figuren-01.json enthaelt F0001-F0100, figuren-02.json F0101-F0200 usw.
 
 const A = args || {}
@@ -26,6 +32,8 @@ const anzahl = Math.max(10, Math.min(200, A.anzahl || 100))
 const maxRedner = Math.max(5, Math.min(40, A.maxRedner || 25))
 const material = Array.isArray(A.material) ? A.material : (A.material ? [A.material] : [])
 const produkt = A.produkt || 'ein Produkt von MSY Studio'
+const stimmungModell = A.sparModell || 'sonnet'
+const stimmungEffort = A.sparEffort || 'medium'
 
 function hash(text) {
   let h = 2166136261
@@ -141,18 +149,29 @@ const stimmung = [].concat(...(await parallel(gruppen.map((g, k) => () => {
     '- spricht: Würde diese Person im Meeting etwas sagen? Schüchterne, Desinteressierte und Überforderte schweigen oft, Laute reden auch ohne Ahnung.\n' +
     '- erster_gedanke: ein Satz in ihren eigenen Worten.\n' +
     '- Übernimm alter, geschlecht, land, ort und taetigkeit (Beruf oder Schule) genau aus dem Steckbrief.\n\n' + REGELN,
-    { label: 'Stimmung ' + (k + 1) + ' (' + g[0] + '–' + g[g.length - 1] + ')', phase: 'Stimmung', schema: STIMMUNG, model: 'sonnet', effort: 'medium' }
+    { label: 'Stimmung ' + (k + 1) + ' (' + g[0] + '–' + g[g.length - 1] + ')', phase: 'Stimmung', schema: STIMMUNG, model: stimmungModell, effort: stimmungEffort }
   ).then(r => (r && r.figuren) ? r.figuren : [])
 }))).filter(Boolean))
 log('Stimmung: ' + stimmung.length + ' von ' + ids.length + ' Figuren, davon ' + stimmung.filter(f => f.spricht).length + ' wollen reden')
 
-// 2. Wortmeldungen: wer redet (deterministisch begrenzt, Kritiker bleiben dabei)
+// 2. Wortmeldungen: wer redet (deterministisch begrenzt, Kritiker bleiben dabei).
+// Gleichstand entscheidet eine aus dem Startwert gemischte Reihenfolge der Gezogenen, nicht die Kennung:
+// die Kennungen sind nach Laendern vergeben, sonst kaemen bei Gleichstand fast nur Figuren eines Landes zu Wort.
 phase('Wortmeldungen')
+const mischen = prng(hash('redner|' + seed))
+const reihenfolge = ids.slice()
+for (let i = reihenfolge.length - 1; i > 0; i--) {
+  const j = Math.floor(mischen() * (i + 1))
+  const t = reihenfolge[i]; reihenfolge[i] = reihenfolge[j]; reihenfolge[j] = t
+}
+const rang = new Map(reihenfolge.map((id, i) => [id, i]))
+const platz = f => (rang.has(f.id) ? rang.get(f.id) : rang.size)
+const nachPlatz = (a, b) => platz(a) - platz(b) || String(a.id).localeCompare(String(b.id))
 const redenWollen = stimmung.filter(f => f.spricht)
 let redner = redenWollen
 if (redenWollen.length > maxRedner) {
-  const kritiker = redenWollen.filter(f => f.interesse <= 3).slice(0, Math.min(5, Math.floor(maxRedner / 4)))
-  const rest = redenWollen.filter(f => !kritiker.includes(f)).sort((a, b) => b.interesse - a.interesse || a.id.localeCompare(b.id))
+  const kritiker = redenWollen.filter(f => f.interesse <= 3).sort(nachPlatz).slice(0, Math.min(5, Math.floor(maxRedner / 4)))
+  const rest = redenWollen.filter(f => !kritiker.includes(f)).sort((a, b) => b.interesse - a.interesse || nachPlatz(a, b))
   redner = kritiker.concat(rest.slice(0, maxRedner - kritiker.length))
 }
 const worte = (await parallel(redner.map(f => () => agent(

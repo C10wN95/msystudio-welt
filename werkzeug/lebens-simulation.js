@@ -1,11 +1,11 @@
 export const meta = {
   name: 'lebens-simulation',
   description: 'Lebens-Simulation mit der simulierten Welt von MSY Studio: Freundeskreise leben Wochen, treffen sich oder nicht, spielen das Produkt, etwas anderes oder gar nichts; ausgewaehlte Abende im Detail; wer spielt am meisten',
-  whenToUse: 'Statt oder vor echten Testabenden und um zu sehen, wer ein Produkt wirklich nutzt. args: {welt, produkt, version, material, materialText, verboten, wochen, kreise, abende, seed, start, ausgabe, projektablage, startbefehl, hinweis, minSpieler, maxSpieler, wochenOhneDateien, sparModell, sparEffort}',
+  whenToUse: 'Statt oder vor echten Testabenden und um zu sehen, wer ein Produkt wirklich nutzt. args: {welt, produkt, version, material, materialText, verboten, wochen, kreise, abende, seed, start, ausgabe, projektablage, startbefehl, hinweis, minSpieler, maxSpieler, wochenOhneDateien, sparModell, sparEffort, bilderBeschreiben}',
   phases: [
     { title: 'Kreise', detail: 'Freundeskreise aus der Welt ziehen' },
     { title: 'Wochen', detail: 'je Kreis die Wochen: Treffen, Tun, Spielen oder nicht' },
-    { title: 'Abende', detail: 'ausgewaehlte Spieleabende im Detail' },
+    { title: 'Abende', detail: 'ausgewaehlte Spieleabende im Detail (mit bilderBeschreiben vorher einmal alle Bilder beschreiben)' },
     { title: 'Auswertung', detail: 'wer spielt am meisten, warum nicht, was stattdessen' },
   ],
 }
@@ -17,8 +17,18 @@ export const meta = {
 //   projektablage (zweiter Ordner, z. B. im eigenen privaten Projekt, fuer Bericht und Rohdaten), startbefehl (Vorsatz fuer Rechenlaeufe der Agenten),
 //   wochenOhneDateien (true: die Wochen sehen nur Text-Material, die Dateien, etwa viele Bilder, nur die Abende; spart Tokens),
 //   sparModell (z. B. 'sonnet': Modell fuer Kreise ziehen und Wochen; Spielleiter und Auswertung bleiben beim Modell der Sitzung; spart Tokens),
-//   sparEffort (z. B. 'medium': Denkaufwand fuer Kreise ziehen und Wochen).
-// Kosten: Jeder Spielleiter sieht alle Dateien des Materials. Viele grosse Fotos machen die Abende teuer; Fotos vorher verkleinern.
+//   sparEffort (z. B. 'medium': Denkaufwand fuer Kreise ziehen und Wochen),
+//   bilderBeschreiben (true; Standard aus): Vor den Abenden beschreibt EIN Agent (Modell der Sitzung) jedes Bild des Materials genau
+//     einmal: sichtbare Texte woertlich, Knoepfe, Uhren, Zahlen, Aufbau, Lesbarkeit. Die Beschreibung steht danach in
+//     <ausgabe>/bilder-beschreibung.md. Die Spielleiter lesen sie statt die Bilder anzusehen und oeffnen ein Bild nur, wenn eine Szene
+//     ohne das Bild nicht zu beurteilen ist, jedes hoechstens einmal. Bilder sind Dateien in material mit der Endung png, jpg, jpeg,
+//     gif, webp oder bmp (Ordner werden nicht durchsucht). Gibt es keinen Abend, entfaellt die Beschreibung.
+//     Sinnvoll bei vielen Bildern (Dutzende Fotos oder Screenshots), vor allem mit mehreren Abenden und zusammen mit wochenOhneDateien;
+//     bei wenigen Bildern spart es kaum etwas.
+//     Achtung: Die Option aendert die Wahrnehmung der Spielleiter (Text statt Bild). Laeufe, die miteinander verglichen oder an echten
+//     Tests kalibriert werden, immer mit derselben Einstellung fahren.
+// Kosten: Ohne bilderBeschreiben sieht jeder Spielleiter alle Dateien des Materials selbst, auch mehrfach. Viele grosse Fotos machen
+//   die Abende teuer; Fotos vorher verkleinern oder bilderBeschreiben nutzen.
 
 const A = args || {}
 if (!A.welt || !A.produkt || !A.version || !A.ausgabe) throw new Error('lebens-simulation braucht args.welt, args.produkt, args.version und args.ausgabe')
@@ -31,6 +41,9 @@ const maxSpieler = A.maxSpieler || 8
 const material = Array.isArray(A.material) ? A.material : (A.material ? [A.material] : [])
 const verboten = Array.isArray(A.verboten) ? A.verboten : (A.verboten ? [A.verboten] : [])
 const SPAR = Object.assign({}, A.sparModell ? { model: A.sparModell } : {}, A.sparEffort ? { effort: A.sparEffort } : {})
+const IST_BILD = /\.(png|jpe?g|gif|webp|bmp)$/i
+const bilder = material.filter(m => IST_BILD.test(m))
+const BILDER_DATEI = A.ausgabe + '/bilder-beschreibung.md'
 function hash(text) {
   let h = 2166136261
   for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619) }
@@ -131,6 +144,14 @@ const BERICHT = {
   },
   required: ['datei', 'kurzfassung', 'kernpunkte', 'empfehlungen', 'wer_spielt_am_meisten', 'fuer_gruender', 'offen'],
 }
+const BILDBESCHREIBUNG = {
+  type: 'object',
+  properties: {
+    bilder_beschrieben: { type: 'integer', minimum: 0 },
+    nicht_geoeffnet: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['bilder_beschrieben', 'nicht_geoeffnet'],
+}
 
 // 1. Kreise ziehen (deterministisch per seed ueber ein kleines node-Skript)
 phase('Kreise')
@@ -170,13 +191,42 @@ phase('Abende')
 const gespielt = alleTreffen.filter(t => t.produkt_gespielt && t.wer.length >= minSpieler && t.wer.length <= maxSpieler)
 const auswahl = []
 for (const t of gespielt) { if (auswahl.length < abendAnzahl && !auswahl.some(a => a.kreis === t.kreis)) auswahl.push(t) }
+// Wahlweise (bilderBeschreiben): EIN Agent beschreibt vor den Abenden jedes Bild genau einmal, die Spielleiter lesen dann diese Beschreibung
+let ABEND_MATERIAL = MATERIAL
+let bilderBeschrieben = null
+if (A.bilderBeschreiben && !bilder.length) log('Bilder: keine Bilddateien im Material, keine Beschreibung')
+else if (A.bilderBeschreiben && !auswahl.length) log('Bilder: kein Abend, keine Beschreibung')
+else if (A.bilderBeschreiben) {
+  const b = await agent(
+    'Du bereitest die Spielabende einer Simulation von MSY Studio vor. Die Spielleiter sollen die Bilder des Materials nicht selbst ansehen, sondern deine Beschreibung lesen. Beschreibe deshalb jedes dieser ' + bilder.length + ' Bilder genau einmal.\n\n' +
+    'PRODUKT: ' + A.produkt + ', Version ' + A.version + '\nBILDER (das, was Nutzer sehen):\n' + bilder.map(m => '- ' + m).join('\n') + '\n\n' +
+    'So gehst du vor:\n' +
+    '- Öffne jedes Bild genau einmal mit dem Read-Werkzeug, in der Reihenfolge der Liste. Andere Dateien liest du nicht.\n' +
+    '- Je Bild ein Abschnitt mit dem Pfad wie in der Liste als Überschrift. Darin: alle sichtbaren Texte wörtlich in Anführungszeichen, Knöpfe und andere Bedienelemente, Uhren, Zähler und Zahlen, der Aufbau (was wo steht, Größen, Farben, Reihenfolge) und die Lesbarkeit (was klein, verdeckt, unscharf, abgeschnitten oder kontrastarm ist). Beschreibe nur, was zu sehen ist, ohne Urteil über das Produkt.\n' +
+    '- Schreibe nach ' + BILDER_DATEI + ' (Ordner anlegen). Arbeite in Blöcken von höchstens 10 Bildern und hänge jeden Block gleich an die Datei an, ohne die ganze Datei neu zu schreiben.\n' +
+    '- Gib zurück, wie viele Bilder du beschrieben hast und welche du nicht öffnen konntest (Pfad wie in der Liste).\n\n' + REGELN,
+    { label: 'Bilder beschreiben (' + bilder.length + ')', phase: 'Abende', schema: BILDBESCHREIBUNG }
+  )
+  const nicht = b && Array.isArray(b.nicht_geoeffnet) ? b.nicht_geoeffnet : []
+  bilderBeschrieben = b ? b.bilder_beschrieben : 0
+  if (bilderBeschrieben > 0) {
+    const ohneBilder = material.filter(m => !IST_BILD.test(m))
+    ABEND_MATERIAL = 'PRODUKT: ' + A.produkt + ', Version ' + A.version + '\n' +
+      (ohneBilder.length ? 'MATERIAL (das, was Nutzer sehen; mit dem Read-Werkzeug ansehen):\n' + ohneBilder.map(m => '- ' + m).join('\n') + '\n' : '') +
+      'BILDER DES MATERIALS (das, was Nutzer sehen; beschrieben in ' + BILDER_DATEI + '):\n' + bilder.map(m => '- ' + m).join('\n') + '\n' +
+      'Die Beschreibung enthält je Bild einen Abschnitt mit dem Pfad als Überschrift: sichtbare Texte wörtlich, Knöpfe, Uhren, Zahlen, Aufbau, Lesbarkeit. Lies sie vollständig, bei Bedarf in Abschnitten, statt die Bilder anzusehen. Öffne ein Bild nur, wenn eine Szene ohne das Bild nicht zu beurteilen ist, und jedes Bild höchstens einmal; nenne geöffnete Bilder mit Grund am Ende des Protokolls.' +
+      (nicht.length ? '\nNicht beschrieben, weil sie sich nicht öffnen ließen: ' + nicht.join(', ') : '') +
+      (A.materialText ? '\nMATERIAL ALS TEXT:\n' + A.materialText : '') + (A.hinweis ? '\nHINWEIS: ' + A.hinweis : '')
+    log('Bilder: ' + bilderBeschrieben + ' von ' + bilder.length + ' beschrieben in ' + BILDER_DATEI + (nicht.length ? ', nicht geöffnet: ' + nicht.join(', ') : ''))
+  } else log('Bilder: Beschreibung fehlgeschlagen, die Spielleiter sehen die Bilder selbst (teurer)')
+}
 const abende = (await pipeline(
   auswahl,
   (_, t, i) => {
     const k = kreise.find(x => x.kreis === t.kreis)
     const spieler = k ? k.mitglieder.filter(m => t.wer.includes(m.id)) : []
     return agent(
-      'Du bist der Spielleiter einer Simulation von MSY Studio. Spiele diesen Abend mit dem Produkt durch.\n\n' + MATERIAL + '\n\n' +
+      'Du bist der Spielleiter einer Simulation von MSY Studio. Spiele diesen Abend mit dem Produkt durch.\n\n' + ABEND_MATERIAL + '\n\n' +
       'KREIS ' + t.kreis + ', Woche ' + t.woche + ', ' + t.wann + ', ' + t.wo + '. Stimmung vorher: ' + t.stimmung + '.\nSpieler (vollständige Steckbriefe):\n' + spieler.map(m => '- ' + m.name + ' (' + m.id + '): ' + m.steckbrief).join('\n') + '\n\n' +
       'So spielst du:\n' +
       '- Halte dich streng an Regeln, Abläufe, Texte und Bildschirme aus dem Material. Wo es etwas offen lässt, entscheide schlicht und schreib es unter luecken_im_material.\n' +
@@ -232,6 +282,7 @@ const zahlen = {
   ziel_verstanden: zaehle(alleErleben.map(e => e.ziel_verstanden)),
   nochmal: zaehle(alleErleben.map(e => e.nochmal)),
 }
+if (bilderBeschrieben !== null) zahlen.bilder_beschrieben = bilderBeschrieben
 
 // 4. Auswertung
 phase('Auswertung')

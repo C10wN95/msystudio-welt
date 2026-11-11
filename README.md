@@ -46,6 +46,11 @@ Workflow({scriptPath: '<pfad>/werkzeug/lebens-simulation.js', args: {
 
 Die Ausgabe gehört nach `laeufe/`, das nicht mit hochgeladen wird. Was ihr behalten wollt, legt ihr über `projektablage` in eurem eigenen Projekt ab.
 
+Alle Optionen stehen im Kopf des jeweiligen Workflows. Zum Sparen von Tokens:
+
+- **Entwicklungsrunde:** `sparModell` und `sparEffort` gelten nur für die Stimmung aller Gezogenen (Standard `'sonnet'` und `'medium'`, günstiger z. B. `'haiku'` und `'low'`). Wortmeldungen, Diskussion und Bericht bleiben, wie sie sind.
+- **Lebens-Simulation:** Mit `bilderBeschreiben: true` beschreibt vor den Abenden ein Agent jedes Bild des Materials genau einmal (`bilder-beschreibung.md` im Ausgabe-Ordner). Die Spielleiter lesen diese Beschreibung, statt jedes Bild selbst anzusehen. Das lohnt sich bei vielen Bildern, am besten zusammen mit `wochenOhneDateien: true`. Es ändert aber, wie die Spielleiter das Material wahrnehmen: Läufe, die ihr miteinander vergleicht oder an echten Tests kalibriert, fahrt ihr mit derselben Einstellung.
+
 ## Mitmachen
 
 Neue Figuren, Korrekturen, neue Orte, bessere Werkzeuge: Wie das geht, steht in [CONTRIBUTING.md](CONTRIBUTING.md). Beiträge mit echten Personen oder verletzenden Klischees nehmen wir nicht an.
@@ -86,6 +91,8 @@ MSY-Welt is a **fictional world of 1,000 people** with jobs or schools, families
 It comes with two [Claude Code](https://claude.com/claude-code) workflows:
 - **Entwicklungsrunde** (development round): 100 random figures react to a question. Some stay silent, some speak up, and every opinion is reported together with who said it.
 - **Lebens-Simulation** (life simulation): friend circles live for a few weeks, meet or don't, and use the product, something else or nothing, each time with a reason.
+
+All options are documented at the top of each workflow. To save tokens, `sparModell` and `sparEffort` set the model and effort for the first reactions of all drawn figures in the development round only (default `'sonnet'` and `'medium'`, cheaper e.g. `'haiku'` and `'low'`). In the life simulation, `bilderBeschreiben: true` has one agent describe every image of the material once before the evenings (`bilder-beschreibung.md` in the output folder), and the game masters read that description instead of viewing each image. This pays off with many images, best combined with `wochenOhneDateien: true`, but it changes what the game masters perceive: use the same setting for runs you compare or calibrate.
 
 Results are **simulated opinions, not real people**. Calibrate against real tests before relying on them. Contributions are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
