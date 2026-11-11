@@ -1,0 +1,7 @@
+# Laeufe aus Projekten und Tests: nur lokal, nie auf GitHub
+laeufe/
+privat/
+*.lokal.*
+
+# Werkzeug
+node_modules/
